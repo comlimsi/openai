@@ -326,6 +326,69 @@ MODEL_PRICING_PRESETS: dict[str, dict[str, float | None]] = {
 }
 
 
+# Codex usage-limit credits from the provided rate table. These override the
+# older API-style defaults above for models that appear in the Codex table.
+MODEL_PRICING_PRESETS.update(
+    {
+        "gpt-5.5": {
+            "input_cost_per_1m": 125.0,
+            "cached_input_cost_per_1m": 12.50,
+            "output_cost_per_1m": 750.0,
+        },
+        "gpt-5.5-cyber": {
+            "input_cost_per_1m": 500.0,
+            "cached_input_cost_per_1m": 50.0,
+            "output_cost_per_1m": 3000.0,
+        },
+        "gpt-5.4": {
+            "input_cost_per_1m": 62.50,
+            "cached_input_cost_per_1m": 6.250,
+            "output_cost_per_1m": 375.0,
+        },
+        "gpt-5.4-mini": {
+            "input_cost_per_1m": 18.75,
+            "cached_input_cost_per_1m": 1.875,
+            "output_cost_per_1m": 113.0,
+        },
+        "gpt-5.3-codex": {
+            "input_cost_per_1m": 43.75,
+            "cached_input_cost_per_1m": 4.375,
+            "output_cost_per_1m": 350.0,
+        },
+        "gpt-5.2": {
+            "input_cost_per_1m": 43.75,
+            "cached_input_cost_per_1m": 4.375,
+            "output_cost_per_1m": 350.0,
+        },
+        "gpt-5.3-codex-spark": {
+            "input_cost_per_1m": None,
+            "cached_input_cost_per_1m": None,
+            "output_cost_per_1m": None,
+        },
+        "gpt-image-2.0-image": {
+            "input_cost_per_1m": 200.0,
+            "cached_input_cost_per_1m": 50.0,
+            "output_cost_per_1m": 750.0,
+        },
+        "gpt-image-2-image": {
+            "input_cost_per_1m": 200.0,
+            "cached_input_cost_per_1m": 50.0,
+            "output_cost_per_1m": 750.0,
+        },
+        "gpt-image-2.0-text": {
+            "input_cost_per_1m": 125.0,
+            "cached_input_cost_per_1m": 31.25,
+            "output_cost_per_1m": 250.0,
+        },
+        "gpt-image-2-text": {
+            "input_cost_per_1m": 125.0,
+            "cached_input_cost_per_1m": 31.25,
+            "output_cost_per_1m": 250.0,
+        },
+    }
+)
+
+
 @dataclass
 class QueryUsage:
     ts: datetime | None
@@ -512,8 +575,9 @@ def estimate_credits(
     cached_input_cost_per_1m: float | None,
     output_cost_per_1m: float | None,
 ) -> float | None:
+    non_cached_input_tokens = max(0, input_tokens - cached_input_tokens)
     token_costs = (
-        (input_tokens, input_cost_per_1m),
+        (non_cached_input_tokens, input_cost_per_1m),
         (cached_input_tokens, cached_input_cost_per_1m),
         (output_tokens, output_cost_per_1m),
     )
@@ -698,6 +762,7 @@ def main() -> None:
 
     q_input = sum(u.input_tokens for u in all_usages)
     q_cached = sum(u.cached_input_tokens for u in all_usages)
+    q_non_cached = max(0, q_input - q_cached)
     q_output = sum(u.output_tokens for u in all_usages)
     q_reason = sum(u.reasoning_tokens for u in all_usages)
     q_total = sum(u.total_tokens for u in all_usages)
@@ -713,7 +778,7 @@ def main() -> None:
     model_rates = None
     if selected_model:
         model_source = "manual" if args.model else "auto-detected"
-        model_rates = MODEL_PRICING_PRESETS.get(selected_model)
+        model_rates = MODEL_PRICING_PRESETS.get(selected_model.lower())
         if model_rates is None and args.model:
             available = ", ".join(sorted(MODEL_PRICING_PRESETS.keys())) or "(none)"
             raise SystemExit(
@@ -772,6 +837,7 @@ def main() -> None:
                 "events": len(all_usages),
                 "input_tokens": q_input,
                 "cached_input_tokens": q_cached,
+                "non_cached_input_tokens": q_non_cached,
                 "output_tokens": q_output,
                 "reasoning_output_tokens": q_reason,
                 "total_tokens": q_total,
@@ -842,6 +908,7 @@ def main() -> None:
     print(f"- Total tokens: {fmt_int(q_total)}")
     print(f"- Input tokens: {fmt_int(q_input)}")
     print(f"- Cached input tokens: {fmt_int(q_cached)}")
+    print(f"- Non-cached input tokens: {fmt_int(q_non_cached)}")
     print(f"- Output tokens: {fmt_int(q_output)}")
     print(f"- Reasoning output tokens: {fmt_int(q_reason)}")
 
@@ -854,7 +921,7 @@ def main() -> None:
     else:
         print(f"- Estimated credits: {fmt_credits(est_credit)}")
         print(
-            f"  Rates per 1M tokens: input={fmt_rate(input_cost_per_1m)}, "
+            f"  Rates per 1M tokens: non_cached_input={fmt_rate(input_cost_per_1m)}, "
             f"cached={fmt_rate(cached_input_cost_per_1m)}, output={fmt_rate(output_cost_per_1m)}"
         )
 
